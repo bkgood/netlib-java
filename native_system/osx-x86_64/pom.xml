@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.github.fommil.netlib</groupId>
         <artifactId>native_system</artifactId>
-        <version>1.2-SNAPSHOT</version>
+        <version>1.1</version>
     </parent>
 
     <artifactId>netlib-native_system-osx-x86_64</artifactId>
@@ -63,18 +63,20 @@
                 <extensions>true</extensions>
                 <configuration>
                     <javahOS>darwin</javahOS>
-                    <compilerExecutable>gcc-mp-4.8</compilerExecutable>
-                    <linkerExecutable>gcc-mp-4.8</linkerExecutable>
+                    <compilerExecutable>gfortran</compilerExecutable>
+                    <linkerExecutable>gfortran</linkerExecutable>
                     <compilerEndOptions>
-                        <compilerEndOption>-I/System/Library/Frameworks/vecLib.framework/Headers</compilerEndOption>
+                        <!-- <compilerEndOption>-I/System/Library/Frameworks/vecLib.framework/Headers</compilerEndOption> -->
+                        <compilerEndOption>-I/System//Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/Headers/</compilerEndOption>
                     </compilerEndOptions>
                     <linkerMiddleOptions>
                         <linkerMiddleOption>-dynamiclib</linkerMiddleOption>
                         <linkerMiddleOption>-static-libgfortran</linkerMiddleOption>
-                        <linkerMiddleOption>/opt/local/lib/gcc48/libquadmath.a</linkerMiddleOption>
+                        <!--<linkerMiddleOption>/opt/local/lib/gcc48/libquadmath.a</linkerMiddleOption>-->
+                        <linkerMiddleOption>/usr/local//Cellar/gcc/5.2.0/lib/gcc/5/libquadmath.a</linkerMiddleOption>
                         <linkerMiddleOption>-static-libgcc</linkerMiddleOption>
                         <linkerMiddleOption>-framework JavaVM</linkerMiddleOption>
-                        <linkerMiddleOption>-framework veclib</linkerMiddleOption>
+                        <linkerMiddleOption>-framework Accelerate</linkerMiddleOption>
                         <linkerMiddleOption>-lgfortran</linkerMiddleOption>
                         <linkerMiddleOption>-Wl,-dead_strip</linkerMiddleOption>
                         <linkerMiddleOption>-Wl,-exported_symbol,_Java_*</linkerMiddleOption>

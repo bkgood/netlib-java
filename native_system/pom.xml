@@ -15,7 +15,7 @@
     <parent>
         <groupId>com.github.fommil.netlib</groupId>
         <artifactId>parent</artifactId>
-        <version>1.2-SNAPSHOT</version>
+        <version>1.1</version>
     </parent>
 
     <artifactId>native_system</artifactId>
@@ -24,8 +24,10 @@
     <modules>
         <module>java</module>
         <module>osx-x86_64</module>
-        <module>win-i686</module>
-        <module>win-x86_64</module>
+        <!--
+            <module>win-i686</module>
+            <module>win-x86_64</module>
+        -->
         <!-- cross compiles are built separately on a Linux box... -->
     </modules>
 
