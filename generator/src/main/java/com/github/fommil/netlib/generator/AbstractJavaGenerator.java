@@ -40,15 +40,52 @@ public abstract class AbstractJavaGenerator extends AbstractNetlibGenerator {
      * @param method
      * @return parameters to pass to the F2J implementation.
      */
-    protected List<String> getF2jJavaParameters(Method method, final boolean offsets) {
+    protected List<String> getF2jJavaParameters(Method method, final boolean offsets, final VectorParamOutputVariant vectorType) {
         final List<String> args = Lists.newArrayList();
         iterateRelevantParameters(method, offsets, new ParameterCallback() {
+            private boolean skipNext = false;
+
             @Override
             public void process(int i, Class<?> param, String name, String offsetName) {
-                args.add(name);
-                if (param.isArray() && !offsets) args.add("0");
+                if (skipNext) {
+                    skipNext = false;
+                    return;
+                }
+
+                switch (vectorType) {
+                case NIOBUFFER:
+                    if (nioBufferClass(param) != null) {
+                        args.add(name + ".array()");
+
+                        if (offsets) {
+                            args.add(String.format("%s + %s.arrayOffset()", offsetName, name));
+                            skipNext = true;
+                        } else {
+                            args.add(name + ".arrayOffset()");
+                        }
+                        break;
+                    }
+                    // fall-through: we need to add a non-NIOBUFFER-compatible param.
+                default:
+                    args.add(name);
+
+                    if (param.isArray() && !offsets) {
+                        args.add("0");
+                    }
+                }
+
             }
         });
+
+        /*
+        System.out.printf("%s: ", method.getName());
+        for (String arg : args) {
+            System.out.print(arg);
+            System.out.print(" ");
+        }
+        System.out.println();
+        */
+
         return args;
     }
 

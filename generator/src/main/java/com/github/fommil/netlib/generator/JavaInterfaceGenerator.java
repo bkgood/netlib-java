@@ -18,6 +18,7 @@ package com.github.fommil.netlib.generator;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -28,6 +29,8 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Collection;
+import java.util.Set;
 
 @Mojo(
     name = "interface",
@@ -58,9 +61,9 @@ public class JavaInterfaceGenerator extends AbstractJavaGenerator {
   protected String generate(List<Method> methods) throws Exception {
     List<String> members = Lists.newArrayList();
     for (Method method : methods) {
-      members.add(renderMethod(method, false));
+      members.addAll(renderMethods(method, false));
       if (hasOffsets(method))
-        members.add(renderMethod(method, true));
+        members.addAll(renderMethods(method, true));
     }
 
     ST t = jTemplates.getInstanceOf("abstractClass");
@@ -76,18 +79,19 @@ public class JavaInterfaceGenerator extends AbstractJavaGenerator {
     return t.render();
   }
 
-  private String renderMethod(Method method, boolean offsets) throws IOException {
+  @Override
+  protected String renderMethod(Method method, boolean offsets, VectorParamOutputVariant v) throws IOException {
     ST m = jTemplates.getInstanceOf("abstractMethod");
     m.add("return", method.getReturnType());
     if (method.getReturnType().equals(Void.TYPE))
       m.add("returnDocs", "");
     m.add("method", method.getName());
-    m.add("paramTypes", getNetlibJavaParameterTypes(method, offsets));
+    m.add("paramTypes", getNetlibJavaParameterTypes(method, offsets, v));
     m.add("paramNames", getNetlibJavaParameterNames(method, offsets));
     if (!Strings.isNullOrEmpty(javadoc))
       m.add("docs", getJavadocs(method));
     return m.render();
-  }
+}
 
   private String getJavadocs(Method method) throws IOException {
     File jar = getFile(javadoc);

@@ -18,6 +18,7 @@ package com.github.fommil.netlib.generator;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -25,8 +26,10 @@ import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.stringtemplate.v4.ST;
 import org.stringtemplate.v4.STGroupFile;
 
+import java.lang.StringBuilder;
 import java.lang.reflect.Method;
 import java.util.Collections;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -96,9 +99,9 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
 
     List<String> members = Lists.newArrayList();
     for (Method method : methods) {
-      members.add(render(method, false));
+      members.addAll(renderMethods(method, false));
       if (hasOffsets(method))
-        members.add(render(method, true));
+        members.addAll(renderMethods(method, true));
     }
 
     t.add("members", members);
@@ -106,16 +109,72 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
     return t.render();
   }
 
-  private String render(Method method, boolean offsets) {
+  private String generateJniParamSignature(Method method, final boolean offsets, final VectorParamOutputVariant v) {
+    final StringBuilder sb = new StringBuilder();
+
+    iterateRelevantParameters(method, offsets, new ParameterCallback() {
+      @Override
+      public void process(int i, Class<?> param, String name, String offsetName) {
+        switch (v) {
+        case NIOBUFFER:
+          Class<?> nioBufferClass = nioBufferClass(param);
+          param = nioBufferClass == null ? param : nioBufferClass;
+          break;
+        case POINTER_AS_LONG:
+          param = nioBufferClass(param) == null ? param : Long.TYPE;
+        }
+
+        sb.append(jniParamSignature(param));
+      }
+    });
+
+    return sb.toString();
+  }
+
+  private String jniParamSignature(Class<?> clazz) {
+    if (clazz.isArray()) {
+      return "_3" + jniParamSignature(clazz.getComponentType());
+    } else if (clazz.isPrimitive()) {
+      // note Void.Type isn't handled as it can't be a param.
+      if (clazz.equals(Boolean.TYPE)) {
+        return "Z";
+      } else if (clazz.equals(Character.TYPE)) {
+        return "C";
+      } else if (clazz.equals(Byte.TYPE)) {
+        return "B";
+      } else if (clazz.equals(Short.TYPE)) {
+        return "S";
+      } else if (clazz.equals(Integer.TYPE)) {
+        return "I";
+      } else if (clazz.equals(Long.TYPE)) {
+        return "J";
+      } else if (clazz.equals(Float.TYPE)) {
+        return "F";
+      } else if (clazz.equals(Double.TYPE)) {
+        return "D";
+      } else {
+        return null;
+      }
+    } else {
+      return String.format("L%s_2", clazz.getCanonicalName().replace("_", "_1").replace(".", "_"));
+    }
+  }
+
+  @Override
+  protected String renderMethod(Method method, boolean offsets, VectorParamOutputVariant v) {
+    if (v == VectorParamOutputVariant.POINTER_AS_LONG && !hasOffsets(method)) { return ""; }
     ST f = jniTemplates.getInstanceOf("function");
     f.add("returns", jType2C(method.getReturnType()));
-    f.add("fqn", (implementing + "." + method.getName()).replace(".", "_") + (offsets ? "_1offsets" : ""));
+    //f.add("fqn", (implementing + "." + method.getName()).replace(".", "_") + generateSignature(method, offsets));
+    f.add("class", implementing.replace("_", "_1").replace(".", "_"));
+    f.add("method", method.getName().replace("_", "_1"));
+    f.add("signature", generateJniParamSignature(method, offsets, v));
     f.add("name", prefix + method.getName() + suffix);
-    List<String> params = getNetlibCParameterTypes(method, offsets);
+    List<String> params = getNetlibCParameterTypes(method, offsets, v);
     List<String> names = getNetlibJavaParameterNames(method, offsets);
     f.add("paramTypes", params);
     f.add("paramNames", names);
-    f.add("params", getCMethodParams(method, offsets));
+    f.add("params", getCMethodParams(method, offsets, v));
 
     if (method.getReturnType() == Void.TYPE) {
       if (lapacke_hack && Iterables.getLast(names).equals("info")) {
@@ -129,15 +188,19 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
       f.add("return", "return returnValue;");
     }
 
+    List<String> jobjectTypes = getJObjectInitTypes(method, offsets, v);
     List<String> init = Lists.newArrayList();
     List<String> clean = Lists.newArrayList();
 
     for (int i = 0; i < params.size(); i++) {
       String param = params.get(i);
       String name = names.get(i);
+      //System.out.printf("trying to get %s_init\n", param);
       ST before = jniTemplates.getInstanceOf(param + "_init");
       if (lapacke_hack && name.equals("info"))
         before = jniTemplates.getInstanceOf(param + "_info_init");
+      else if (param.equals("jobject"))
+        before = jniTemplates.getInstanceOf(jobjectTypes.get(i) + "_init");
       if (before != null) {
         before.add("name", name);
         init.add(before.render());
@@ -146,6 +209,9 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
       ST after = jniTemplates.getInstanceOf(param + "_clean");
       if (lapacke_hack && name.equals("info"))
         after = jniTemplates.getInstanceOf(param + "_info_clean");
+      else if (param.equals("jobject")) {
+        before = jniTemplates.getInstanceOf(jobjectTypes.get(i) + "_init");
+      }
       if (after != null) {
         after.add("name", name);
         clean.add(after.render());
@@ -158,12 +224,17 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
     return f.render();
   }
 
-  private List<String> getNetlibCParameterTypes(Method method, boolean offsets) {
+  private List<String> getNetlibCParameterTypes(Method method, boolean offsets, final VectorParamOutputVariant v) {
     final List<String> types = Lists.newArrayList();
     iterateRelevantParameters(method, offsets, new ParameterCallback() {
       @Override
       public void process(int i, Class<?> param, String name, String offsetName) {
-        types.add(jType2C(param));
+        if (v == VectorParamOutputVariant.NIOBUFFER && nioBufferClass(param) != null)
+          types.add("jobject");
+        else if (v == VectorParamOutputVariant.POINTER_AS_LONG && nioBufferClass(param) != null)
+          types.add("jlong");
+        else
+          types.add(jType2C(param));
       }
     });
     return types;
@@ -177,7 +248,22 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
     return "j" + param.getSimpleName().toLowerCase();
   }
 
-  private List<String> getCMethodParams(final Method method, final boolean offsets) {
+  private List<String> getJObjectInitTypes(Method method, boolean offsets, final VectorParamOutputVariant v) {
+    final List<String> types = Lists.newArrayList();
+    iterateRelevantParameters(method, offsets, new ParameterCallback() {
+      @Override
+      public void process(int i, Class<?> param, String name, String offsetName) {
+        if (v == VectorParamOutputVariant.NIOBUFFER && nioBufferClass(param) != null)
+          types.add(nioBufferClass(param).getSimpleName());
+        else
+          types.add(null);
+      }
+    });
+
+    return types;
+  }
+
+  private List<String> getCMethodParams(final Method method, final boolean offsets, final VectorParamOutputVariant v) {
     final LinkedList<String> params = Lists.newLinkedList();
     if (firstParam != null && !method.getName().matches(noFirstParam)) {
       params.add(firstParam);
@@ -192,7 +278,12 @@ public class NativeImplJniGenerator extends AbstractNetlibGenerator {
         if (param == Object.class)
           throw new UnsupportedOperationException(method + " " + param + " " + name);
 
-        if (param == Boolean.TYPE || !param.isPrimitive()) {
+        if (v == VectorParamOutputVariant.POINTER_AS_LONG
+              && param.isArray()
+              && param.getComponentType().isPrimitive()
+              && nioBufferClass(param) != null) {
+          name = String.format("(%s*) %s", jType2C(param.getComponentType()), name);
+        } else if (param == Boolean.TYPE || !param.isPrimitive()) {
           name = "jni_" + name;
           // NOTE: direct comparisons against StringW.class don't work as expected
           if (!param.getSimpleName().equals("StringW") && param.getSimpleName().endsWith("W")) {

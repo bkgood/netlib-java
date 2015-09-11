@@ -17,6 +17,7 @@
 package com.github.fommil.netlib.generator;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -25,6 +26,8 @@ import org.stringtemplate.v4.ST;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Collection;
+import java.util.function.Consumer;
 
 /**
  * Generates the Java part of a JNI implementation of a netlib interface.
@@ -76,9 +79,9 @@ public class NativeImplJavaGenerator extends AbstractJavaGenerator {
     for (Method method : methods) {
       ST m = getTemplate(method, false);
       if (m == null) continue;
-      members.add(render(m, method, false));
+      members.addAll(renderMethods(method, false));
       if (hasOffsets(method))
-        members.add(render(getTemplate(method, true), method, true));
+        members.addAll(renderMethods(method, true));
     }
 
     ST t = jTemplates.getInstanceOf("implClass");
@@ -92,7 +95,7 @@ public class NativeImplJavaGenerator extends AbstractJavaGenerator {
   }
 
   private ST getTemplate(Method method, boolean offsets) {
-    ST m = jTemplates.getInstanceOf("nativeImplMethod" + (offsets ? "_offsets" : ""));
+    ST m = jTemplates.getInstanceOf("nativeImplMethod");
     if (unsupported != null && method.getName().matches(unsupported)) {
       if (extending == null)
         m = jTemplates.getInstanceOf("unsupportedMethod");
@@ -102,13 +105,16 @@ public class NativeImplJavaGenerator extends AbstractJavaGenerator {
     return m;
   }
 
-  private String render(ST m, Method method, boolean offsets) {
+  @Override
+  protected String renderMethod(Method method, boolean offsets, VectorParamOutputVariant v) {
+    ST m = getTemplate(method, offsets);
     m.add("returns", method.getReturnType());
-    if (offsets && method.getReturnType() == Void.TYPE)
-      m.add("return", "");
+    //if (offsets && method.getReturnType() == Void.TYPE)
+    //  m.add("returns", "");
     m.add("method", method.getName());
-    m.add("paramTypes", getNetlibJavaParameterTypes(method, offsets));
+    m.add("paramTypes", getNetlibJavaParameterTypes(method, offsets, v));
     m.add("paramNames", getNetlibJavaParameterNames(method, offsets));
+
     return m.render();
   }
 }

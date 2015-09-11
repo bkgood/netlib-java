@@ -24,8 +24,8 @@ include(files) ::= <<
 $files:{f|#include <$f$>};separator="\n"$
 >>
 
-function(returns, fqn, init, clean, paramTypes, paramNames, assignReturn, return, params, name) ::= <<
-JNIEXPORT $returns$ JNICALL Java_$fqn$ (JNIEnv * env, jobject calling_obj, $params(paramTypes,paramNames)$) {
+function(returns, class, method, signature, init, clean, paramTypes, paramNames, assignReturn, return, params, name) ::= <<
+JNIEXPORT $returns$ JNICALL Java_$class$_$method$__$signature$ (JNIEnv * env, jobject calling_obj, $params(paramTypes,paramNames)$) {
   $init; separator="\n"$
   $assignReturn$$name$($params;separator=", "$);
   $clean; separator="\n"$
@@ -157,3 +157,17 @@ jbooleanw_clean(name) ::= <<
 jni_$name$_raw = int2jboolean(jni_$name$);
 (*env)->SetIntField(env, $name$, jni_$name$Id, jni_$name$_raw);
 >>
+
+nioBuffer_init(name, type) ::= <<
+/* $type$* jni_$name$ = NULL;
+if ($name$ != NULL) {
+  jni_$name$ = (*env)->GetDirectBufferAddress(env, $name$);
+  check_memory(env, jni_$name$);
+} */
+
+$type$* jni_$name$ = (*env)->GetDirectBufferAddress(env, $name$);
+>>
+
+DoubleBuffer_init(name, type="jdouble") ::= "$nioBuffer_init(name, type)$"
+FloatBuffer_init(name, type="jfloat") ::= "$nioBuffer_init(name, type)$"
+IntBuffer_init(name, type="jint") ::= "$nioBuffer_init(name, type)$"

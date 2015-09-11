@@ -17,6 +17,7 @@
 package com.github.fommil.netlib.generator;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -25,6 +26,8 @@ import org.stringtemplate.v4.ST;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Set;
+import java.util.Collection;
 
 /**
  * Generates the F2J implementation of a netlib-java interface for the given methods.
@@ -46,9 +49,10 @@ public class F2jImplGenerator extends AbstractJavaGenerator {
   protected String generate(List<Method> methods) throws Exception {
     List<String> members = Lists.newArrayList();
     for (Method method : methods) {
-      members.add(renderMethod(method, false));
-      if (hasOffsets(method))
-        members.add(renderMethod(method, true));
+      members.addAll(renderMethods(method, false));
+      if (hasOffsets(method)) {
+        members.addAll(renderMethods(method, true));
+      }
     }
 
     ST t = jTemplates.getInstanceOf("implClass");
@@ -61,17 +65,27 @@ public class F2jImplGenerator extends AbstractJavaGenerator {
     return t.render();
   }
 
-  private String renderMethod(Method method, boolean offsets) {
-    ST m = jTemplates.getInstanceOf("f2jImplMethod");
+  @Override
+  protected String renderMethod(Method method, boolean offsets, VectorParamOutputVariant v) {
+    boolean unsupported = (
+        v == VectorParamOutputVariant.POINTER_AS_LONG
+        // only if we have offsetable params; otherwise we will generate a
+        // duplicate signature.
+        && hasOffsets(method));
+
+    ST m = jTemplates.getInstanceOf(unsupported ? "unsupportedMethod" : "f2jImplMethod");
     m.add("returns", method.getReturnType());
     m.add("method", method.getName());
-    m.add("paramTypes", getNetlibJavaParameterTypes(method, offsets));
+    m.add("paramTypes", getNetlibJavaParameterTypes(method, offsets, v));
     m.add("paramNames", getNetlibJavaParameterNames(method, offsets));
-    m.add("impl", method.getDeclaringClass().getCanonicalName() + "." + method.getName());
-    m.add("calls", getF2jJavaParameters(method, offsets));
-    if (method.getReturnType().equals(Void.TYPE))
-      m.add("return", "");
+
+    if (!unsupported) {
+      m.add("impl", method.getDeclaringClass().getCanonicalName() + "." + method.getName());
+      m.add("calls", getF2jJavaParameters(method, offsets, v));
+      if (method.getReturnType().equals(Void.TYPE))
+        m.add("return", "");
+    }
+
     return m.render();
   }
-
 }

@@ -21,6 +21,7 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 import com.thoughtworks.paranamer.*;
 import org.apache.maven.artifact.Artifact;
@@ -32,8 +33,12 @@ import org.apache.maven.project.MavenProject;
 
 import javax.annotation.Nullable;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.List;
+import java.util.Collection;
+import java.nio.*;
 
 public abstract class AbstractNetlibGenerator extends AbstractMojo {
 
@@ -112,6 +117,7 @@ public abstract class AbstractNetlibGenerator extends AbstractMojo {
         paranamer = new CachingParanamer(new JavadocParanamer(getFile(javadoc)));
 
       File jar = getFile(input);
+
       JarMethodScanner scanner = new JarMethodScanner(jar);
 
       List<Method> methods = Lists.newArrayList(
@@ -149,15 +155,42 @@ public abstract class AbstractNetlibGenerator extends AbstractMojo {
     return params;
   }
 
+  protected enum VectorParamOutputVariant {
+    ARRAY,
+    NIOBUFFER,
+    POINTER_AS_LONG,
+    // XXX generate a f2j wrapper for pointers, doing copies + unsafe (not
+    // great but better than no implementation, I guess)
+  }
+
+  protected VectorParamOutputVariant[] vectorParamOutputVariants() {
+    return VectorParamOutputVariant.class.getEnumConstants();
+  }
+
   /**
    * @param method
    * @return canonical parameter types for the netlib interface.
    */
-  protected List<String> getNetlibJavaParameterTypes(Method method, boolean offsets) {
+  protected List<String> getNetlibJavaParameterTypes(Method method, boolean offsets, final VectorParamOutputVariant vectorType) {
     final List<String> types = Lists.newArrayList();
     iterateRelevantParameters(method, offsets, new ParameterCallback() {
       @Override
       public void process(int i, Class<?> param, String name, String offsetName) {
+        switch (vectorType) {
+          case NIOBUFFER:
+            Class<?> nioClass = nioBufferClass(param);
+            param = nioClass != null ? nioClass : param;
+            break;
+          case POINTER_AS_LONG:
+            // XXX only working for pointers to direct buffers atm
+            param = nioBufferClass(param) != null ? Long.TYPE : param;
+            break;
+          case ARRAY:
+            // fall-through: leave it as is.
+          default:
+            break;
+        }
+
         types.add(param.getCanonicalName());
       }
     });
@@ -207,6 +240,32 @@ public abstract class AbstractNetlibGenerator extends AbstractMojo {
     }
   }
 
+  protected Class<?> nioBufferClass(Class<?> clazz) {
+      Class<?> compType = clazz.getComponentType();
+
+      if (compType == null) {
+          return null;
+      } else if (compType.equals(Character.TYPE)) {
+          return CharBuffer.class;
+      } else if (compType.equals(Integer.TYPE)) {
+          return IntBuffer.class;
+      } else if (compType.equals(Double.TYPE)) {
+          return DoubleBuffer.class;
+      } else if (compType.equals(Float.TYPE)) {
+          return FloatBuffer.class;
+      } else if (compType.equals(Long.TYPE)) {
+          return LongBuffer.class;
+      } else if (compType.equals(Short.TYPE)) {
+          return ShortBuffer.class;
+      // there's no boolean[]-from-ByteBuffer thing, so we're stuck with
+      // boolean[]
+      //} else if (compType.equals(Boolean.TYPE)) {
+      //    return ByteBuffer.class;
+      } else {
+          return null;
+      }
+  }
+
   public boolean hasOffsets(Method method) {
     Class<?> last = null;
     for (int i = 0; i < method.getParameterTypes().length; i++) {
@@ -218,4 +277,15 @@ public abstract class AbstractNetlibGenerator extends AbstractMojo {
     return false;
   }
 
+  abstract protected String renderMethod(Method method, boolean offsets, VectorParamOutputVariant v) throws IOException;
+
+  protected Collection<String> renderMethods(Method method, boolean offsets) throws IOException {
+    Collection<String> methods = Sets.newHashSet();
+
+    for (VectorParamOutputVariant v : vectorParamOutputVariants()) {
+      methods.add(renderMethod(method, offsets, v));
+    }
+
+    return methods;
+  }
 }
